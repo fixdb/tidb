@@ -71,7 +71,8 @@ func (a *aggregationPushDownSolver) isDecomposableWithUnion(fun *aggregation.Agg
 	}
 }
 
-// getAggFuncChildIdx gets which children it belongs to, 0 stands for left, 1 stands for right, -1 stands for both.
+// getAggFuncChildIdx gets which children it belongs to.
+// 0 stands for left, 1 stands for right, -1 stands for both, 2 stands for neither (e.g. count(*), sum(1) ...)
 func (a *aggregationPushDownSolver) getAggFuncChildIdx(aggFunc *aggregation.AggFuncDesc, schema *expression.Schema) int {
 	fromLeft, fromRight := false, false
 	var cols []*expression.Column
@@ -87,8 +88,10 @@ func (a *aggregationPushDownSolver) getAggFuncChildIdx(aggFunc *aggregation.AggF
 		return -1
 	} else if fromLeft {
 		return 0
+	} else if fromRight {
+		return 1
 	}
-	return 1
+	return 2
 }
 
 // collectAggFuncs collects all aggregate functions and splits them into two parts: "leftAggFuncs" and "rightAggFuncs" whose
@@ -104,9 +107,26 @@ func (a *aggregationPushDownSolver) collectAggFuncs(agg *LogicalAggregation, joi
 		index := a.getAggFuncChildIdx(aggFunc, leftChild.Schema())
 		switch index {
 		case 0:
+			if join.JoinType == RightOuterJoin {
+				return false, nil, nil
+			}
 			leftAggFuncs = append(leftAggFuncs, aggFunc)
 		case 1:
+			if join.JoinType == LeftOuterJoin {
+				return false, nil, nil
+			}
 			rightAggFuncs = append(rightAggFuncs, aggFunc)
+		case 2:
+			// arguments are constant
+			switch join.JoinType {
+			case LeftOuterJoin:
+				leftAggFuncs = append(leftAggFuncs, aggFunc)
+			case RightOuterJoin:
+				rightAggFuncs = append(rightAggFuncs, aggFunc)
+			default:
+				// either left or right is fine, ideally we'd better put this to the hash build side
+				rightAggFuncs = append(rightAggFuncs, aggFunc)
+			}
 		default:
 			return false, nil, nil
 		}
