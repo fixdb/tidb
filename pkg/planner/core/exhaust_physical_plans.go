@@ -2011,6 +2011,16 @@ func recordIndexJoinHintWarnings(p *logicalop.LogicalJoin, prop *property.Physic
 		return plannererrors.ErrInternal.FastGen(errMsg)
 	}
 	// handle index join hints.
+	if p.HintInfo != nil && p.HintInfo.IndexJoinFirst {
+		if prop.IsSortItemEmpty() || inEnforce {
+			errMsg := "Optimizer Hint INDEX_JOIN_FIRST is inapplicable"
+			if len(p.EqualConditions) == 0 {
+				errMsg += " without column equal ON condition"
+			}
+			return plannererrors.ErrInternal.FastGen(errMsg)
+		}
+		return nil
+	}
 	if !p.PreferAny(h.PreferRightAsINLJInner, h.PreferRightAsINLHJInner, h.PreferRightAsINLMJInner,
 		h.PreferLeftAsINLJInner, h.PreferLeftAsINLHJInner, h.PreferLeftAsINLMJInner) {
 		return nil // no force index join hints
@@ -2067,6 +2077,12 @@ func applyLogicalHintVarEigen(lp base.LogicalPlan, pp base.PhysicalPlan, childTa
 // we cache the most preferred one among this valid and preferred physic plans. If there is no preferred physic applicable
 // for the logic hint, we will return false and the optimizer will continue to return the normal low-cost one.
 func applyLogicalJoinHint(lp base.LogicalPlan, physicPlan base.PhysicalPlan) (preferred bool) {
+	if preferIndexJoinFirst(lp, physicPlan) {
+		return true
+	}
+	if p, ok := lp.(*logicalop.LogicalJoin); ok && p.HintInfo != nil && p.HintInfo.IndexJoinFirst {
+		return false
+	}
 	return preferMergeJoin(lp, physicPlan) || preferIndexJoinFamily(lp, physicPlan) ||
 		preferHashJoin(lp, physicPlan)
 }
@@ -2287,6 +2303,21 @@ func preferIndexJoinFamily(lp base.LogicalPlan, physicPlan base.PhysicalPlan) (p
 		return true
 	}
 	return false
+}
+
+func preferIndexJoinFirst(lp base.LogicalPlan, physicPlan base.PhysicalPlan) (preferred bool) {
+	p, ok := lp.(*logicalop.LogicalJoin)
+	if !ok {
+		return false
+	}
+	if physicPlan == nil || p.HintInfo == nil || !p.HintInfo.IndexJoinFirst {
+		return false
+	}
+	if _, ok := physicPlan.(*physicalop.PhysicalApply); ok {
+		return true
+	}
+	_, _, ok = getIndexJoinSideAndMethod(physicPlan)
+	return ok
 }
 
 // handleForceIndexJoinHints handles the force index join hints and returns all plans that can satisfy the hints.

@@ -37,13 +37,14 @@ import (
 func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 	joinMethodHintInfo := make(map[int]*joinorder.JoinMethodHint)
 	var (
-		group              []base.LogicalPlan
-		joinOrderHintInfo  []*h.PlanHints
-		eqEdges            []*expression.ScalarFunction
-		otherConds         []expression.Expression
-		joinTypes          []*joinTypeWithExtMsg
-		hasOuterJoin       bool
-		currentLeadingHint *h.PlanHints // Track the active LEADING hint
+		group                  []base.LogicalPlan
+		joinOrderHintInfo      []*h.PlanHints
+		eqEdges                []*expression.ScalarFunction
+		otherConds             []expression.Expression
+		joinTypes              []*joinTypeWithExtMsg
+		hasOuterJoin           bool
+		currentLeadingHint     *h.PlanHints // Track the active LEADING hint
+		indexJoinFirstHintInfo *h.PlanHints
 	)
 
 	// Check if the current plan is a Selection. If its child is a join, add the selection conditions
@@ -62,6 +63,9 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 	}
 
 	join, isJoin := p.(*logicalop.LogicalJoin)
+	if isJoin && join.HintInfo != nil && join.HintInfo.IndexJoinFirst {
+		indexJoinFirstHintInfo = join.HintInfo
+	}
 	if isJoin && join.PreferJoinOrder {
 		// When there is a leading hint, the hint may not take effect for other reasons.
 		// For example, the join type is cross join or straight join, or exists the join algorithm hint, etc.
@@ -86,7 +90,7 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		return &joinGroupResult{
 			group:              []base.LogicalPlan{p},
 			joinOrderHintInfo:  joinOrderHintInfo,
-			basicJoinGroupInfo: &basicJoinGroupInfo{},
+			basicJoinGroupInfo: &basicJoinGroupInfo{indexJoinFirstHintInfo: indexJoinFirstHintInfo},
 		}
 	}
 	// If the session var is set to off, we will still reject the outer joins.
@@ -94,7 +98,7 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		return &joinGroupResult{
 			group:              []base.LogicalPlan{p},
 			joinOrderHintInfo:  joinOrderHintInfo,
-			basicJoinGroupInfo: &basicJoinGroupInfo{},
+			basicJoinGroupInfo: &basicJoinGroupInfo{indexJoinFirstHintInfo: indexJoinFirstHintInfo},
 		}
 	}
 	// `leftHasHint` and `rightHasHint` are used to record whether the left child and right child are set by the join method hint.
@@ -147,7 +151,7 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		if noExpand {
 			return &joinGroupResult{
 				group:              []base.LogicalPlan{p},
-				basicJoinGroupInfo: &basicJoinGroupInfo{},
+				basicJoinGroupInfo: &basicJoinGroupInfo{indexJoinFirstHintInfo: indexJoinFirstHintInfo},
 			}
 		}
 		group = append(group, lhsGroup...)
@@ -156,6 +160,9 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		joinTypes = append(joinTypes, lhsJoinTypes...)
 		joinOrderHintInfo = append(joinOrderHintInfo, lhsJoinOrderHintInfo...)
 		maps.Copy(joinMethodHintInfo, lhsJoinMethodHintInfo)
+		if indexJoinFirstHintInfo == nil {
+			indexJoinFirstHintInfo = lhsJoinGroupResult.indexJoinFirstHintInfo
+		}
 		hasOuterJoin = hasOuterJoin || lhsHasOuterJoin
 	} else {
 		group = append(group, join.Children()[0])
@@ -194,7 +201,7 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		if noExpand {
 			return &joinGroupResult{
 				group:              []base.LogicalPlan{p},
-				basicJoinGroupInfo: &basicJoinGroupInfo{},
+				basicJoinGroupInfo: &basicJoinGroupInfo{indexJoinFirstHintInfo: indexJoinFirstHintInfo},
 			}
 		}
 		group = append(group, rhsGroup...)
@@ -203,6 +210,9 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		joinTypes = append(joinTypes, rhsJoinTypes...)
 		joinOrderHintInfo = append(joinOrderHintInfo, rhsJoinOrderHintInfo...)
 		maps.Copy(joinMethodHintInfo, rhsJoinMethodHintInfo)
+		if indexJoinFirstHintInfo == nil {
+			indexJoinFirstHintInfo = rhsJoinGroupResult.indexJoinFirstHintInfo
+		}
 		hasOuterJoin = hasOuterJoin || rhsHasOuterJoin
 	} else {
 		group = append(group, join.Children()[1])
@@ -233,10 +243,11 @@ func extractJoinGroup(p base.LogicalPlan) *joinGroupResult {
 		hasOuterJoin:      hasOuterJoin,
 		joinOrderHintInfo: joinOrderHintInfo,
 		basicJoinGroupInfo: &basicJoinGroupInfo{
-			eqEdges:            eqEdges,
-			otherConds:         otherConds,
-			joinTypes:          joinTypes,
-			joinMethodHintInfo: joinMethodHintInfo,
+			eqEdges:                eqEdges,
+			otherConds:             otherConds,
+			joinTypes:              joinTypes,
+			indexJoinFirstHintInfo: indexJoinFirstHintInfo,
+			joinMethodHintInfo:     joinMethodHintInfo,
 		},
 	}
 }
@@ -375,6 +386,8 @@ type basicJoinGroupInfo struct {
 	eqEdges    []*expression.ScalarFunction
 	otherConds []expression.Expression
 	joinTypes  []*joinTypeWithExtMsg
+	// indexJoinFirstHintInfo keeps the index_join_first hint for the join group.
+	indexJoinFirstHintInfo *h.PlanHints
 	// `joinMethodHintInfo` is used to map the sub-plan's ID to the join method hint.
 	// The sub-plan will join the join reorder process to build the new plan.
 	// So after we have finished the join reorder process, we can reset the join method hint based on the sub-plan's ID.
@@ -637,7 +650,7 @@ func (s *baseSingleGroupJoinOrderSolver) newCartesianJoin(lChild, rChild base.Lo
 	}.Init(s.ctx, offset)
 	join.SetSchema(expression.MergeSchema(lChild.Schema(), rChild.Schema()))
 	join.SetChildren(lChild, rChild)
-	joinorder.SetNewJoinWithHint(join, s.joinMethodHintInfo)
+	joinorder.SetNewJoinWithHint(join, s.joinMethodHintInfo, s.indexJoinFirstHintInfo)
 	return join
 }
 

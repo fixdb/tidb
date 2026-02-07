@@ -1727,7 +1727,7 @@ func (p *LogicalJoin) SetPreferredJoinTypeAndOrder(hintInfo *utilhint.PlanHints)
 		p.PreferJoinOrder = hintInfo.MatchTableName([]*utilhint.HintedTable{lhsAlias, rhsAlias}, hintInfo.LeadingJoinOrder)
 	}
 	// set hintInfo for further usage if this hint info can be used.
-	if p.PreferJoinType != 0 || p.PreferJoinOrder {
+	if p.PreferJoinType != 0 || p.PreferJoinOrder || hintInfo.IndexJoinFirst {
 		p.HintInfo = hintInfo
 	}
 }

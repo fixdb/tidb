@@ -1076,6 +1076,7 @@ var hintTokenMap = map[string]int{
 	"NO_INDEX_HASH_JOIN":       hintNoIndexHashJoin,
 	"INL_JOIN":                 hintInlJoin,
 	"INDEX_JOIN":               hintIndexJoin,
+	"INDEX_JOIN_FIRST":         hintIndexJoinFirst,
 	"NO_INDEX_JOIN":            hintNoIndexJoin,
 	"INL_MERGE_JOIN":           hintInlMergeJoin,
 	"INDEX_MERGE_JOIN":         hintIndexMergeJoin,

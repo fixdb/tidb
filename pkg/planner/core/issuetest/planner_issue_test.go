@@ -17,6 +17,7 @@ package issuetest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/pingcap/tidb/pkg/parser"
@@ -130,6 +131,29 @@ func TestPlannerIssueRegressions(t *testing.T) {
 		tk.MustExec("create table t2(col_1 int, col_2 int, index idx_2(col_1));")
 		tk.MustQuery("select /*+ inl_join(tmp) */ * from t1 inner join (select col_1, group_concat(col_2) from t2 group by col_1) tmp on t1.col_1 = tmp.col_1;").Check(testkit.Rows())
 		tk.MustQuery("select /*+ inl_join(tmp) */ * from t1 inner join (select col_1, group_concat(distinct col_2 order by col_2) from t2 group by col_1) tmp on t1.col_1 = tmp.col_1;").Check(testkit.Rows())
+	}
+
+	// index-join-first-hint
+	{
+		tk := prepareSharedTestKit(t)
+		tk.MustExec("create table t1(a int, b int, index idx_a(a))")
+		tk.MustExec("create table t2(a int, b int, index idx_a(a))")
+		tk.MustExec("insert into t1 values (1, 1), (2, 2), (3, 3)")
+		tk.MustExec("insert into t2 values (1, 10), (2, 20), (3, 30)")
+		tk.MustExec("analyze table t1")
+		tk.MustExec("analyze table t2")
+		tk.MustExec("set @@session.tidb_opt_index_join_cost_factor=100000")
+
+		rows := tk.MustQuery("explain format='brief' select /*+ INDEX_JOIN_FIRST() */ * from t1 join t2 on t1.a = t2.a").Rows()
+		found := false
+		for _, row := range rows {
+			line := fmt.Sprint(row[0])
+			if strings.Contains(line, "IndexJoin") || strings.Contains(line, "IndexHashJoin") || strings.Contains(line, "IndexMergeJoin") {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "expected index join family plan with INDEX_JOIN_FIRST() hint")
 	}
 
 	// only-full-group-by-view

@@ -126,6 +126,8 @@ const (
 	HintUseToja = "use_toja"
 	// HintNoIndexMerge is a hint to disable index merge
 	HintNoIndexMerge = "no_index_merge"
+	// HintIndexJoinFirst is a hint to prefer index join over other join types if possible.
+	HintIndexJoinFirst = "index_join_first"
 	// HintMaxExecutionTime specifies the max allowed execution time in milliseconds
 	HintMaxExecutionTime = "max_execution_time"
 
@@ -563,6 +565,7 @@ type PlanHints struct {
 	HJBuild               []HintedTable    // hash_join_build
 	HJProbe               []HintedTable    // hash_join_probe
 	NoIndexLookUpPushDown []HintedTable    // no_index_lookup_pushdown
+	IndexJoinFirst        bool             // index_join_first
 
 	// Hints belows are not associated with any particular table.
 	PreferAggType     uint // hash_agg, merge_agg, agg_to_cop and so on
@@ -786,6 +789,7 @@ func ParsePlanHints(hints []*ast.TableOptimizerHint,
 		leadingHintCnt                                                                  int
 		leadingList                                                                     *ast.LeadingList
 		straightJoinHint                                                                bool
+		indexJoinFirst                                                                  bool
 	)
 	for _, hint := range hints {
 		// Set warning for the hint that requires the table name.
@@ -925,6 +929,8 @@ func ParsePlanHints(hints []*ast.TableOptimizerHint,
 			timeRangeHint = hint.HintData.(ast.HintTimeRange)
 		case HintLimitToCop:
 			preferLimitToCop = true
+		case HintIndexJoinFirst:
+			indexJoinFirst = true
 		case HintMerge:
 			if hint.Tables != nil {
 				warnHandler.SetHintWarning("The MERGE hint is not used correctly, maybe it inputs a table name.")
@@ -993,6 +999,7 @@ func ParsePlanHints(hints []*ast.TableOptimizerHint,
 		HJProbe:               hjProbeTables,
 		NoIndexLookUpPushDown: noIndexLookUpPushDownTables,
 		StraightJoinOrder:     straightJoinHint,
+		IndexJoinFirst:        indexJoinFirst,
 	}, subQueryHintFlags, nil
 }
 

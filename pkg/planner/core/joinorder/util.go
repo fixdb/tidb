@@ -315,7 +315,7 @@ func containsTableInLeadingList(leadingList *ast.LeadingList, dbName, tableName 
 }
 
 // SetNewJoinWithHint sets the join method hint for the join node.
-func SetNewJoinWithHint(newJoin *logicalop.LogicalJoin, vertexHints map[int]*JoinMethodHint) {
+func SetNewJoinWithHint(newJoin *logicalop.LogicalJoin, vertexHints map[int]*JoinMethodHint, indexJoinFirstHintInfo *hint.PlanHints) {
 	if newJoin == nil {
 		return
 	}
@@ -328,6 +328,9 @@ func SetNewJoinWithHint(newJoin *logicalop.LogicalJoin, vertexHints map[int]*Joi
 	if joinMethodHint, ok := vertexHints[rChild.ID()]; ok {
 		newJoin.RightPreferJoinType = joinMethodHint.PreferJoinMethod
 		newJoin.HintInfo = joinMethodHint.HintInfo
+	}
+	if newJoin.HintInfo == nil && indexJoinFirstHintInfo != nil {
+		newJoin.HintInfo = indexJoinFirstHintInfo
 	}
 	newJoin.SetPreferredJoinType()
 }
